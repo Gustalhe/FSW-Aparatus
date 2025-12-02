@@ -2,6 +2,34 @@ This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-
 
 ## Getting Started
 
+### Variáveis de Ambiente
+
+Crie um arquivo `.env.local` na raiz do projeto com as seguintes variáveis:
+
+```env
+# Database (obrigatório)
+DATABASE_URL="postgresql://user:password@localhost:5432/database?schema=public"
+
+# Stripe (obrigatório para criar agendamentos)
+STRIPE_SECRET_KEY="sk_test_..."
+NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY="pk_test_..."
+STRIPE_WEBHOOK_SECRET="whsec_..."
+
+# App URL (obrigatório para checkout do Stripe)
+NEXT_PUBLIC_APP_URL="http://localhost:3000"
+
+# Google OAuth (opcional - para autenticação social)
+GOOGLE_CLIENT_ID=""
+GOOGLE_CLIENT_SECRET=""
+
+# OpenAI (opcional - para chat)
+OPENAI_API_KEY=""
+```
+
+**Nota:** Para obter as chaves do Stripe, crie uma conta em [stripe.com](https://stripe.com) e acesse o dashboard para obter as chaves de teste.
+
+### Executando o projeto
+
 First, run the development server:
 
 ```bash

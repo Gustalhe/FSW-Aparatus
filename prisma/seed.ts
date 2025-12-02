@@ -1,6 +1,15 @@
 import { PrismaClient } from "../generated/prisma/client";
+import { PrismaPg } from "@prisma/adapter-pg";
+import { Pool } from "pg";
 
-const prisma = new PrismaClient();
+const connectionString = process.env.DATABASE_URL;
+if (!connectionString) {
+  throw new Error("DATABASE_URL is not set");
+}
+
+const pool = new Pool({ connectionString });
+const adapter = new PrismaPg(pool);
+const prisma = new PrismaClient({ adapter });
 
 async function seedDatabase() {
   try {
@@ -102,10 +111,53 @@ async function seedDatabase() {
 
     // Criar 10 barbearias com nomes e endereços fictícios
     const barbershops = [];
+    const allServices: Array<{
+      id: string;
+      barbershopId: string;
+      name: string;
+    }> = [];
+
+    // Criar usuários primeiro para associar como donos
+    const testUsers = [
+      {
+        id: "test-user-1",
+        name: "João Silva",
+        email: "joao.silva@example.com",
+        emailVerified: true,
+        image: "https://i.pravatar.cc/150?img=1",
+      },
+      {
+        id: "test-user-2",
+        name: "Maria Santos",
+        email: "maria.santos@example.com",
+        emailVerified: true,
+        image: "https://i.pravatar.cc/150?img=2",
+      },
+      {
+        id: "test-user-3",
+        name: "Pedro Oliveira",
+        email: "pedro.oliveira@example.com",
+        emailVerified: false,
+        image: "https://i.pravatar.cc/150?img=3",
+      },
+    ];
+
+    const createdUsers = [];
+    for (const userData of testUsers) {
+      const user = await prisma.user.upsert({
+        where: { id: userData.id },
+        update: {},
+        create: userData,
+      });
+      createdUsers.push(user);
+    }
+
     for (let i = 0; i < 10; i++) {
       const name = creativeNames[i];
       const address = addresses[i];
       const imageUrl = images[i];
+      // Associar as primeiras 3 barbearias aos usuários criados
+      const ownerId = i < 3 ? createdUsers[i].id : null;
 
       const barbershop = await prisma.barbershop.create({
         data: {
@@ -115,11 +167,12 @@ async function seedDatabase() {
           phones: ["(11) 99999-9999", "(11) 99999-9999"],
           description:
             "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Donec ac augue ullamcorper, pharetra orci mollis, auctor tellus. Phasellus pharetra erat ac libero efficitur tempus. Donec pretium convallis iaculis. Etiam eu felis sollicitudin, cursus mi vitae, iaculis magna. Nam non erat neque. In hac habitasse platea dictumst. Pellentesque molestie accumsan tellus id laoreet.",
+          ownerId,
         },
       });
 
       for (const service of services) {
-        await prisma.barbershopService.create({
+        const createdService = await prisma.barbershopService.create({
           data: {
             name: service.name,
             description: service.description,
@@ -132,13 +185,121 @@ async function seedDatabase() {
             imageUrl: service.imageUrl,
           },
         });
+
+        allServices.push({
+          id: createdService.id,
+          barbershopId: barbershop.id,
+          name: createdService.name,
+        });
       }
 
       barbershops.push(barbershop);
     }
 
+    // Criar bookings de teste para simular agendamentos
+    const now = new Date();
+    const tomorrow = new Date(now);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    tomorrow.setHours(10, 0, 0, 0); // 10:00
+
+    const dayAfterTomorrow = new Date(now);
+    dayAfterTomorrow.setDate(dayAfterTomorrow.getDate() + 2);
+    dayAfterTomorrow.setHours(14, 30, 0, 0); // 14:30
+
+    const nextWeek = new Date(now);
+    nextWeek.setDate(nextWeek.getDate() + 7);
+    nextWeek.setHours(11, 0, 0, 0); // 11:00
+
+    // Booking 1: Amanhã às 10:00 - Usuário 1
+    if (allServices.length > 0 && barbershops.length > 0) {
+      await prisma.booking.create({
+        data: {
+          serviceId: allServices[0].id,
+          barbershopId: allServices[0].barbershopId,
+          userId: createdUsers[0].id,
+          date: tomorrow,
+          cancelled: false,
+        },
+      });
+
+      // Booking 2: Depois de amanhã às 14:30 - Usuário 2
+      if (allServices.length > 1) {
+        await prisma.booking.create({
+          data: {
+            serviceId: allServices[1].id,
+            barbershopId: allServices[1].barbershopId,
+            userId: createdUsers[1].id,
+            date: dayAfterTomorrow,
+            cancelled: false,
+          },
+        });
+      }
+
+      // Booking 3: Próxima semana às 11:00 - Usuário 1 (mesmo barbershop, horário diferente)
+      if (allServices.length > 0) {
+        await prisma.booking.create({
+          data: {
+            serviceId: allServices[0].id,
+            barbershopId: allServices[0].barbershopId,
+            userId: createdUsers[0].id,
+            date: nextWeek,
+            cancelled: false,
+          },
+        });
+      }
+
+      // Booking 4: Cancelado - Usuário 3
+      if (allServices.length > 2 && barbershops.length > 1) {
+        const cancelledDate = new Date(now);
+        cancelledDate.setDate(cancelledDate.getDate() + 3);
+        cancelledDate.setHours(15, 0, 0, 0);
+
+        await prisma.booking.create({
+          data: {
+            serviceId: allServices[2].id,
+            barbershopId: allServices[2].barbershopId,
+            userId: createdUsers[2].id,
+            date: cancelledDate,
+            cancelled: true,
+            cancelledAt: new Date(),
+          },
+        });
+      }
+
+      // Booking 5: Passado (para testar histórico) - Usuário 1
+      const pastDate = new Date(now);
+      pastDate.setDate(pastDate.getDate() - 5);
+      pastDate.setHours(16, 0, 0, 0);
+
+      if (allServices.length > 0) {
+        await prisma.booking.create({
+          data: {
+            serviceId: allServices[0].id,
+            barbershopId: allServices[0].barbershopId,
+            userId: createdUsers[0].id,
+            date: pastDate,
+            cancelled: false,
+          },
+        });
+      }
+    }
+
+    const barbershopsWithOwners = barbershops.filter((b) => b.ownerId);
+
+    console.log("✅ Seed concluído com sucesso!");
+    console.log(`📊 Criados:`);
+    console.log(`   - ${barbershops.length} barbearias`);
+    console.log(`   - ${barbershopsWithOwners.length} barbearias com donos`);
+    console.log(`   - ${allServices.length} serviços`);
+    console.log(`   - ${createdUsers.length} usuários`);
+    console.log(`   - 5 agendamentos de teste`);
+    console.log(`\n🔑 Para testar o painel admin:`);
+    console.log(`   - Faça login com: ${createdUsers[0]?.email}`);
+    console.log(`   - Acesse: /barbershops/${barbershops[0]?.id}/admin`);
+
     // Fechar a conexão com o banco de dados
     await prisma.$disconnect();
+    await pool.end();
   } catch (error) {
     console.error("Erro ao criar as barbearias:", error);
   }

@@ -2,14 +2,20 @@ import { prisma } from "@/lib/prisma";
 import { notFound } from "next/navigation";
 import Image from "next/image";
 import Link from "next/link";
-import { ChevronLeft } from "lucide-react";
+import { ChevronLeft, Settings } from "lucide-react";
 import { Button } from "@/app/_components/ui/button";
 import { Separator } from "@/app/_components/ui/separator";
 import { ServiceItem } from "@/app/_components/service-item";
 import { PhoneItem } from "@/app/_components/phone-item";
+import { auth } from "@/lib/auth";
+import { headers } from "next/headers";
 
 const BarbershopPage = async (props: PageProps<"/barbershops/[id]">) => {
   const { id } = await props.params;
+  const session = await auth.api.getSession({
+    headers: await headers(),
+  });
+
   const barbershop = await prisma.barbershop.findUnique({
     where: {
       id,
@@ -22,6 +28,8 @@ const BarbershopPage = async (props: PageProps<"/barbershops/[id]">) => {
   if (!barbershop) {
     notFound();
   }
+
+  const isOwner = session?.user?.id === barbershop.ownerId;
 
   return (
     <div className="flex size-full flex-col items-start overflow-clip">
@@ -36,8 +44,8 @@ const BarbershopPage = async (props: PageProps<"/barbershops/[id]">) => {
           />
         </div>
 
-        {/* Botão Voltar */}
-        <div className="absolute top-0 left-0 flex w-full items-baseline gap-[91px] px-5 pt-6 pb-0">
+        {/* Botões de Navegação */}
+        <div className="absolute top-0 left-0 flex w-full items-baseline justify-between px-5 pt-6 pb-0">
           <Button
             size="icon"
             variant="secondary"
@@ -48,6 +56,18 @@ const BarbershopPage = async (props: PageProps<"/barbershops/[id]">) => {
               <ChevronLeft className="size-5" />
             </Link>
           </Button>
+          {isOwner && (
+            <Button
+              size="icon"
+              variant="secondary"
+              className="overflow-clip rounded-full"
+              asChild
+            >
+              <Link href={`/barbershops/${id}/admin`}>
+                <Settings className="size-5" />
+              </Link>
+            </Button>
+          )}
         </div>
       </div>
 

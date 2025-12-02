@@ -4,9 +4,6 @@ import { actionClient } from "@/lib/action-client";
 import { prisma } from "@/lib/prisma";
 import z from "zod";
 import { endOfDay, format, startOfDay } from "date-fns";
-import { auth } from "@/lib/auth";
-import { headers } from "next/headers";
-import { returnValidationErrors } from "next-safe-action";
 
 const inputSchema = z.object({
   barbershopId: z.string(),
@@ -38,30 +35,33 @@ const TIME_SLOTS = [
 export const getDateAvailableTimeSlots = actionClient
   .inputSchema(inputSchema)
   .action(async ({ parsedInput: { barbershopId, date } }) => {
-    const session = await auth.api.getSession({
-      headers: await headers(),
-    });
-    if (!session?.user) {
-      returnValidationErrors(inputSchema, {
-        _errors: ["Unauthorized"],
-      });
-    }
-    const bookings = await prisma.booking.findMany({
-      where: {
-        barbershopId,
-        date: {
-          gte: startOfDay(date),
-          lte: endOfDay(date),
+    try {
+      const startDate = startOfDay(date);
+      const endDate = endOfDay(date);
+
+      const bookings = await prisma.booking.findMany({
+        where: {
+          barbershopId,
+          cancelled: false,
+          date: {
+            gte: startDate,
+            lte: endDate,
+          },
         },
-      },
-    });
-    const occupiedSlots = bookings.map((booking) =>
-      format(booking.date, "HH:mm"),
-    );
-    const availableTimeSlots = TIME_SLOTS.filter(
-      (slot) => !occupiedSlots.includes(slot),
-    );
-    return availableTimeSlots;
+      });
+
+      const occupiedSlots = bookings.map((booking) =>
+        format(booking.date, "HH:mm"),
+      );
+      const availableTimeSlots = TIME_SLOTS.filter(
+        (slot) => !occupiedSlots.includes(slot),
+      );
+
+      return availableTimeSlots;
+    } catch (error) {
+      console.error("Error in getDateAvailableTimeSlots:", error);
+      throw error;
+    }
   });
 
 //   => ["10:00", "11:00"]

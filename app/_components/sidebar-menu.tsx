@@ -6,15 +6,37 @@ import {
   HomeIcon,
   LogInIcon,
   LogOutIcon,
+  SettingsIcon,
 } from "lucide-react";
 import Link from "next/link";
 import { Avatar, AvatarFallback, AvatarImage } from "./ui/avatar";
 import { Button } from "./ui/button";
 import { Separator } from "./ui/separator";
 import { SheetClose } from "./ui/sheet";
+import { useQuery } from "@tanstack/react-query";
+import { getUserBarbershops } from "../_actions/get-user-barbershops";
 
 const SidebarMenu = () => {
   const { data: session } = authClient.useSession();
+
+  const { data: barbershopsResult } = useQuery({
+    queryKey: ["user-barbershops", session?.user?.id],
+    queryFn: async () => {
+      if (!session?.user) {
+        return [];
+      }
+      const result = await getUserBarbershops({});
+      if (result?.serverError || result?.validationErrors) {
+        return [];
+      }
+      return result?.data || [];
+    },
+    enabled: Boolean(session?.user),
+    initialData: [],
+  });
+
+  const barbershops = barbershopsResult || [];
+  const hasBarbershops = barbershops.length > 0;
 
   const handleLogin = async () => {
     await authClient.signIn.social({
@@ -85,6 +107,41 @@ const SidebarMenu = () => {
             </Button>
           </Link>
         </SheetClose>
+        {hasBarbershops && (
+          <>
+            {barbershops.length === 1 ? (
+              <SheetClose asChild>
+                <Link href={`/barbershops/${barbershops[0].id}/admin`}>
+                  <Button
+                    variant="ghost"
+                    className="h-auto w-full justify-start gap-3 rounded-full px-5 py-3"
+                  >
+                    <SettingsIcon className="size-4" />
+                    <span className="text-sm font-medium">Gerenciar</span>
+                  </Button>
+                </Link>
+              </SheetClose>
+            ) : (
+              <div className="flex flex-col gap-1">
+                {barbershops.map((barbershop) => (
+                  <SheetClose key={barbershop.id} asChild>
+                    <Link href={`/barbershops/${barbershop.id}/admin`}>
+                      <Button
+                        variant="ghost"
+                        className="h-auto w-full justify-start gap-3 rounded-full px-5 py-3"
+                      >
+                        <SettingsIcon className="size-4" />
+                        <span className="text-sm font-medium">
+                          {barbershop.name}
+                        </span>
+                      </Button>
+                    </Link>
+                  </SheetClose>
+                ))}
+              </div>
+            )}
+          </>
+        )}
       </div>
 
       <Separator />

@@ -31,19 +31,55 @@ interface ServiceItemProps {
 export function ServiceItem({ service }: ServiceItemProps) {
   const [selectedDate, setSelectedDate] = useState<Date | undefined>();
   const [selectedTime, setSelectedTime] = useState<string | undefined>();
-  const { executeAsync, isPending } = useAction(createBooking);
+  const { isPending } = useAction(createBooking);
   const { executeAsync: executeCreateBookingCheckoutSession } = useAction(
     createBookingCheckoutSession,
   );
   const [sheetIsOpen, setSheetIsOpen] = useState(false);
-  const { data: availableTimeSlots } = useQuery({
+  const {
+    data: availableTimeSlotsResult,
+    isLoading: isLoadingTimeSlots,
+    error: timeSlotsError,
+  } = useQuery({
     queryKey: ["date-available-time-slots", service.barbershopId, selectedDate],
-    queryFn: () =>
-      getDateAvailableTimeSlots({
+    queryFn: async () => {
+      // Normalizar a data para garantir que a hora seja 00:00:00
+      const normalizedDate = selectedDate
+        ? new Date(
+            selectedDate.getFullYear(),
+            selectedDate.getMonth(),
+            selectedDate.getDate(),
+          )
+        : undefined;
+
+      if (!normalizedDate) {
+        return [];
+      }
+
+      const result = await getDateAvailableTimeSlots({
         barbershopId: service.barbershopId,
-        date: selectedDate!,
-      }),
+        date: normalizedDate,
+      });
+
+      if (result?.serverError || result?.validationErrors) {
+        const errorMessage =
+          result.validationErrors?._errors?.[0] ||
+          result.serverError ||
+          "Erro ao buscar horários disponíveis";
+        throw new Error(errorMessage);
+      }
+
+      // Garantir que sempre retornamos um array
+      const data = result?.data;
+
+      if (!Array.isArray(data)) {
+        return [];
+      }
+
+      return data;
+    },
     enabled: Boolean(selectedDate),
+    initialData: [],
   });
 
   const handleDateSelect = (date: Date | undefined) => {
@@ -70,34 +106,58 @@ export function ServiceItem({ service }: ServiceItemProps) {
   today.setHours(0, 0, 0, 0);
 
   const handleConfirm = async () => {
-    if (!process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY) {
-      toast.error("Erro ao criar checkout session");
-      return;
-    }
     if (!selectedTime || !selectedDate) {
       return;
     }
+
+    // Verificar variáveis de ambiente no cliente
+    const stripePublishableKey = process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY;
+
+    if (!stripePublishableKey) {
+      toast.error(
+        "NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY não está configurada. Configure as variáveis de ambiente do Stripe no arquivo .env.local",
+      );
+      console.error(
+        "Variável de ambiente faltando: NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY",
+      );
+      return;
+    }
+
     const timeSplitted = selectedTime.split(":"); // [10, 00]
     const hours = timeSplitted[0];
     const minutes = timeSplitted[1];
     const date = new Date(selectedDate);
     date.setHours(Number(hours), Number(minutes));
+
     const checkoutSessionResult = await executeCreateBookingCheckoutSession({
       serviceId: service.id,
       date,
     });
+
     if (
       checkoutSessionResult.serverError ||
       checkoutSessionResult.validationErrors
     ) {
-      toast.error(checkoutSessionResult.validationErrors?._errors?.[0]);
+      const errorMessage =
+        checkoutSessionResult.serverError ||
+        checkoutSessionResult.validationErrors?._errors?.[0] ||
+        "Erro ao criar checkout session";
+      toast.error(errorMessage);
+      console.error("Checkout session error:", {
+        serverError: checkoutSessionResult.serverError,
+        validationErrors: checkoutSessionResult.validationErrors,
+      });
       return;
     }
-    const stripe = await loadStripe(
-      process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY!,
-    );
-    if (!stripe || !checkoutSessionResult.data?.id) {
-      toast.error("Erro ao carregar Stripe");
+
+    if (!checkoutSessionResult.data?.id) {
+      toast.error("Erro: ID da sessão de checkout não foi retornado");
+      return;
+    }
+
+    const stripe = await loadStripe(stripePublishableKey);
+    if (!stripe) {
+      toast.error("Erro ao carregar biblioteca do Stripe");
       return;
     }
     await stripe.redirectToCheckout({
@@ -179,16 +239,26 @@ export function ServiceItem({ service }: ServiceItemProps) {
               <Separator />
 
               <div className="flex gap-3 overflow-x-auto px-5 [&::-webkit-scrollbar]:hidden">
-                {availableTimeSlots?.data?.map((time) => (
-                  <Button
-                    key={time}
-                    variant={selectedTime === time ? "default" : "outline"}
-                    className="shrink-0 rounded-full px-4 py-2"
-                    onClick={() => setSelectedTime(time)}
-                  >
-                    {time}
-                  </Button>
-                ))}
+                {isLoadingTimeSlots ? (
+                  <p className="text-muted-foreground text-sm">
+                    Carregando horários...
+                  </p>
+                ) : timeSlotsError ? (
+                  <p className="text-destructive text-sm">
+                    Erro ao carregar horários
+                  </p>
+                ) : (
+                  (availableTimeSlotsResult || []).map((time: string) => (
+                    <Button
+                      key={time}
+                      variant={selectedTime === time ? "default" : "outline"}
+                      className="shrink-0 rounded-full px-4 py-2"
+                      onClick={() => setSelectedTime(time)}
+                    >
+                      {time}
+                    </Button>
+                  ))
+                )}
               </div>
 
               <Separator />
